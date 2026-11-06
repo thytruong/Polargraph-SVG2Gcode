@@ -78,7 +78,7 @@ function loadSVG(event) {
 
     reader.onload = function () {
         svgDiv.value = reader.result;
-        gcodeDiv.value += svg2gcode(reader.result);
+        gcodeDiv.value += svg2gcode(reader.result, {}, Parameters);
     }
     reader.readAsText(input.files[0]);
 }
@@ -87,7 +87,7 @@ function loadSVGFromText() {
 
     var svg = svgDiv.value;
     if (svg !== "") {
-        gcodeDiv.value += svg2gcode(svg);
+        gcodeDiv.value += svg2gcode(svg, {}, Parameters);
     }
 }
 
@@ -119,7 +119,7 @@ function px2mm(val) {
 }
 
 function polarX(segmentX, segmentY, convertion = 0) {
-    var polarSegmentX = (Math.sqrt(Math.pow(segmentX, 2) + Math.pow(segmentY, 2))) * 10; //pythagore *10
+    var polarSegmentX = Math.sqrt(Math.pow(segmentX, 2) + Math.pow(segmentY, 2));
     if (convertion == 1) {
         polarSegmentX = px2mm(polarSegmentX) //convertion if neccessary
     }
@@ -128,7 +128,7 @@ function polarX(segmentX, segmentY, convertion = 0) {
 }
 
 function polarY(segmentX, segmentY, convertion = 0) {
-    var polarSegmentY = Math.sqrt(Math.pow(Parameters.widthPX - segmentX, 2) + Math.pow(segmentY, 2)) * 10;
+    var polarSegmentY = Math.sqrt(Math.pow(Parameters.widthPX - segmentX, 2) + Math.pow(segmentY, 2));
     if (convertion == 1) {
         polarSegmentY = px2mm(polarSegmentY) //convertion if neccessary
     }
@@ -137,23 +137,32 @@ function polarY(segmentX, segmentY, convertion = 0) {
 }
 
 function command(event) {
+    // PEN_UP_CMD / PEN_DOWN_CMD / polargraphNative / nativeConfigFromParameters viennent de svg2gcode.js
+    // (à charger avant ce fichier) : une seule source de vérité pour les commandes stylo et les unités.
     switch (event) {
         case 'penDown':
-            gcodeDiv.textContent += 'C14,END \n';
+            gcodeDiv.value += PEN_DOWN_CMD + ',END\n';      // C13
             gcodeDiv.scrollTop = gcodeDiv.scrollHeight;
             break;
         case 'penUp':
-            gcodeDiv.textContent += 'C13, END \n';
+            gcodeDiv.value += PEN_UP_CMD + ',END\n';        // C14
             gcodeDiv.scrollTop = gcodeDiv.scrollHeight;
             break;
-        case 'goHome':
-            gcodeDiv.textContent += 'C09,' + polarX(Parameters.xPosition, Parameters.yPosition) + ',' + polarY(Parameters.xPositionPX, Parameters.yPositionPX, 1) + ',END \n';
-            gcodeDiv.scrollTop = gcodeDiv.scrollHeight;
+        case 'goHome': {
+            // C09 déclare la position courante (longueurs de fil en PAS), comme Machine.asNativeCoords
+            var home = polargraphNative(parseFloat(Parameters.xPosition), parseFloat(Parameters.yPosition),
+                                        nativeConfigFromParameters(Parameters));
+            if (home) {
+                gcodeDiv.value += 'C09,' + (+home.a.toFixed(3)) + ',' + (+home.b.toFixed(3)) + ',END\n';
+                gcodeDiv.scrollTop = gcodeDiv.scrollHeight;
+            } else {
+                console.error('goHome : largeur machine ou position invalide', Parameters);
+            }
             break;
+        }
         case 'reset':
-            gcodeDiv.textContent += 'C27, END \n';
+            gcodeDiv.value += 'C27,END\n';
             gcodeDiv.scrollTop = gcodeDiv.scrollHeight;
             break;
-
     }
 }

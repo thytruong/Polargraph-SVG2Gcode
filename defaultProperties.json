@@ -1,1 +1,19 @@
-var defaultProperties = {"machineName":"KultXL XL ","widthMotor":"2900","widthPX":10960.62992139,"heightMotor":"3200","xPosition":"1450","xPositionPX":5480.314960695,"yPosition":"2800","yPositionPX":10582.67716548,"mmPerRev":"80","setpsPerRev":"200","microstepping":"16","maxSpeed":"6844","acceleration":"2028"}
+var defaultProperties = {
+    "machineName": "KultXL XL ",
+    "widthMotor": "2900",
+    "widthPX": 10960.62992139,
+    "heightMotor": "3200",
+    "xPosition": "1450",
+    "xPositionPX": 5480.314960695,
+    "yPosition": "2800",
+    "yPositionPX": 10582.67716548,
+    "mmPerRev": "80",
+    "setpsPerRev": "200",
+    "microstepping": "16",
+    "maxSpeed": "6844",
+    "acceleration": "2028",
+
+"scale": 0.924,
+"offsetX": 742.3,
+"offsetY": 1920.7
+}
