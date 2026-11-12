@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf8">
+<title>svg2gcode byte-for-byte test vs examples/lines.txt</title>
+<script src="file:///C:/Users/Thy/Dev/Polargraph-SVG2Gcode/_js/vec2.js"></script>
+<script src="file:///C:/Users/Thy/Dev/Polargraph-SVG2Gcode/_js/SVGReader.js"></script>
+<script src="file:///C:/Users/Thy/Dev/Polargraph-SVG2Gcode/_js/svg2gcode.js"></script>
+<script type="text/plain" id="svgsrc">
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!DOCTYPE svg PUBLIC '-//W3C//DTD SVG 1.0//EN'
+          'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="1560.0mm" height="840.0mm" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg"
+><!--Created with DrawingBotV3 Premium Version: 1.6.25 Stable 
+Date: 2026-11-10 at 11:39:43 CET  
+Shapes: 1  
+Total Travel: 7.1 m 
+Distance Down: 7.1 m 
+Distance Up: 0.0 m 
+Pen Lifts: 0 
+Page Size: 1560.0 mm x 840.0 mm 
+Drawing Size: 751.1 mm x 618.5 mm 
+
+Pens:
+ Pen 1: 100 Black - 7.1 m 
+--><g id="Copic_Original_100_Black"
+  ><g transform="matrix(0.6401,0,0,0.6401,0,0) translate(885.7143,0)" style="fill:rgb(49,43,43); stroke-width:17.7143; stroke-linejoin:round; stroke:rgb(49,43,43); stroke-linecap:round;"
+    ><path style="fill:none;" d="M5279.5029 1012.4223 L5397.5156 3111.8013 L4906.8325 999.9999 L2807.4534 1186.3354 L2397.5156 3316.7703 L4496.8945 3099.3787 L2397.5156 4279.5029 L4496.8945 3900.6211 L6596.2739 4652.1738 L4316.77 3931.677 L6416.1489 3956.5217 L4316.77 3757.7639 L2217.3914 3664.5962 L4316.77 3099.3787 L2217.3914 4602.4844 L4316.77 3621.1179 L2217.3914 4248.4473 L2987.5779 2149.0684 L2521.7393 4248.4473 L2161.4907 2149.0684"
+    /></g
+  ></g
+></svg
+></script>
+<script type="text/plain" id="expected">
+C14,END
+C17,6726,5970,2,END
+C13,END
+C17,7405,6677,2,END
+C17,6630,6039,2,END
+C17,6215,6555,2,END
+C17,6860,7330,2,END
+C17,7202,6833,2,END
+C17,7197,7646,2,END
+C17,7466,7111,2,END
+C17,8169,7051,2,END
+C17,7439,7154,2,END
+C17,7907,6822,2,END
+C17,7381,7094,2,END
+C17,6950,7482,2,END
+C17,7163,6867,2,END
+C17,7281,7790,2,END
+C17,7335,7046,2,END
+C17,7156,7673,2,END
+C17,6573,6822,2,END
+C17,7208,7610,2,END
+C17,6414,7009,2,END
+C14,END</script>
+<script>
+window.addEventListener('load', function(){
+  var out = document.getElementById('out');
+  var svg = document.getElementById('svgsrc').textContent.replace(/^\n/,'');
+  var expected = document.getElementById('expected').textContent.replace(/^\n/,'');
+  // XL_KultXL.properties.txt values
+  var params = { widthMotor: 2900, heightMotor: 3200, mmPerRev: 80.5, setpsPerRev: 200 };
+  var settings = { unitToMM: 1, scale: 0.246, offsetX: 746.94, offsetY: 1932.73,
+                   minLineLength: 2, maxSegmentLength: 2, outputUnit: 'steps' };
+  var got = svg2gcode(svg, settings, params).replace(/\n$/,'');
+  var e = expected.split('\n'), g = got.split('\n');
+  var diffs = [];
+  var n = Math.max(e.length, g.length);
+  for (var i=0;i<n;i++) if (e[i]!==g[i]) diffs.push('#'+(i+1)+' exp['+(e[i]===undefined?'-':e[i])+'] got['+(g[i]===undefined?'-':g[i])+']');
+  out.textContent = (diffs.length===0 ? 'PASS byte-for-byte ('+e.length+' lines)\n' : 'FAIL\n')
+    + diffs.join('\n') + '\nlines got: '+g.length + '\nfirst got: ' + g[0];
+});
+</script>
+<div id="out">running…</div>

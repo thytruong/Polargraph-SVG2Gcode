@@ -24,6 +24,13 @@
  *   maxSegmentLength    4e paramètre de C17 (défaut 2)
  *   decimals            décimales si outputUnit = 'mm' (défaut 3)
  *   penUpCmd / penDownCmd   défaut C14 / C13  (firmware : C13 = stylo posé, C14 = stylo levé)
+ *   unitToMM            override : mm par SVG user unit. Le controller (geomerative/RG) NOT
+ *                       convertit user units — reproduction byte-exact of controller output
+ *                       needs unitToMM=1 + scale = controller.vector.scaling/100 (e.g. XL :
+ *                       scaling 24.6 → scale 0.246, offsetX/Y = controller.vector.position).
+ *   minLineLength       low-pass filter, in steps, compared on NATIVE (A,B) coords — same as
+ *                       controller filterPointsLowPass (filterParam =
+ *                       controller.vector.minLineLength, XL : 2 ; defaut 0 = filter ditbled).
  */
 
 var PX_TO_MM = 25.4 / 96;      // 1 px CSS = 0,264583… mm (dashBoard.js utilisait 0,2646 ; SVGReader 90 dpi)
@@ -183,7 +190,8 @@ function polargraphNative(xIn, yIn, cfg) {
 
     var n = calculateNativeCoords(x, y, W);
     if (!n) return null;
-    return { a: applyRounding(n.x, rounding), b: applyRounding(n.y, rounding) };
+    return { a: applyRounding(n.x, rounding), b: applyRounding(n.y, rounding),
+             af: n.x, bf: n.y };   // af/bf : floats pre-rounding (low-pass filter + lift test)
 }
 
 
@@ -276,9 +284,12 @@ function svg2gcode(svg, settings, parameters) {
     var decimals = toNum(pickOption('decimals', settings, parameters, 3), 3);
     var penUp = String(pickOption('penUpCmd', settings, parameters, PEN_UP_CMD));
     var penDown = String(pickOption('penDownCmd', settings, parameters, PEN_DOWN_CMD));
-    var mmPerUnit = doc.unitToMM * scale;
+    // unitToMM override : controller = 1 (reads user units raw, no conversion)
+    var unitToMMpick = pickOption('unitToMM', settings, parameters, null);
+    var mmPerUnit = (unitToMMpick !== null ? toNum(unitToMMpick, doc.unitToMM) : doc.unitToMM) * scale;
+    var minLineLength = toNum(pickOption('minLineLength', settings, parameters, 0), 0);
 
-    // Format de sortie : décimales configurables en mm ; pas entiers sinon (arrondis faits dans polargraphNative)
+    // Format de sortie : décimales configurables en mm ; pas entiers sinon (arrondis fait dans polargraphNative)
     function fmt(v) {
         return (cfg.outputUnit === 'mm') ? (+v.toFixed(decimals)).toString() : String(v);
     }
@@ -286,11 +297,19 @@ function svg2gcode(svg, settings, parameters) {
     var parsed = SVGReader.parse(svg, {});
     var paths = parsed.allcolors || [];
 
+    /* Sequence de émission : replica of sendVectorShapes in drawing.pde
+     * + filterPointsLowPass (native filter) : per path, if the first point differs from
+     * the last emitted, C14 ; then C17 on first point ; then C13 if lifted ; then
+     * remaining points C17 ; final C14 at very end. The first point of a path is NOT
+     * emitted with C09 — controller always uses CMD_CHANGELENGTHDIRECT (C17).
+     * low-pass : keep point j only if |ΔA|>minLineLength OR |ΔB|>minLineLength (native,
+     * integer steps) ; path with <2 surviving points emits nothing. */
     var lines = [];
+    var lastPoint = { x: 0, y: 0 };   // PVector lastPoint = new PVector()
     for (var i = 0; i < paths.length; i++) {
         var sub = paths[i] || [];
-        var moves = [];
-        var first = true;
+        // phase 1 : all points converted, those outside machine dropped
+        var pts = [];
         for (var j = 0; j < sub.length; j++) {
             var p = sub[j];
             if (!p || !isFinite(p.x) || !isFinite(p.y)) continue;
@@ -299,21 +318,31 @@ function svg2gcode(svg, settings, parameters) {
             var n = polargraphNative(mx, my, cfg);
             if (!n) {
                 console.warn('svg2gcode : point (' + mx.toFixed(2) + ' ; ' + my.toFixed(2) + ' mm) hors de la machine, ignoré');
-                first = true;   // le prochain point émis redevient un C09
                 continue;
             }
-            if (first) {
-                moves.push('C09,' + fmt(n.a) + ',' + fmt(n.b) + ',END');
-            } else {
-                moves.push('C17,' + fmt(n.a) + ',' + fmt(n.b) + ',' + maxSeg + ',END');
-            }
-            first = false;
+            pts.push(n);
         }
-        if (moves.length === 0) continue;   // tracé vide ou hors machine : on saute
-        lines.push(penUp + ',END');
-        lines.push(penDown + ',END');
-        for (var k = 0; k < moves.length; k++) lines.push(moves[k]);
-        lines.push(penUp + ',END');
+        // phase 2 : low-pass filter on native coords (like filterPointsLowPass)
+        var filtered = [];
+        for (var k = 0; k < pts.length; k++) {
+            if (filtered.length === 0) { filtered.push(pts[k]); continue; }
+            var prev = filtered[filtered.length - 1];
+            var diffA = Math.trunc(pts[k].af + 0.5) - Math.trunc(prev.af + 0.5);
+            var diffB = Math.trunc(pts[k].bf + 0.5) - Math.trunc(prev.bf + 0.5);
+            if (Math.abs(diffA) > minLineLength || Math.abs(diffB) > minLineLength) {
+                filtered.push(pts[k]);
+            }
+        }
+        if (filtered.length < 2) continue;   // controller : result.size()<2 → clear ; empty path emits nothing
+        var lift = !(filtered[0].af === lastPoint.x && filtered[0].bf === lastPoint.y);
+        if (lift) lines.push(penUp + ',END');
+        lines.push('C17,' + fmt(filtered[0].a) + ',' + fmt(filtered[0].b) + ',' + maxSeg + ',END');
+        if (lift) lines.push(penDown + ',END');
+        for (var m = 1; m < filtered.length; m++) {
+            lines.push('C17,' + fmt(filtered[m].a) + ',' + fmt(filtered[m].b) + ',' + maxSeg + ',END');
+        }
+        var lp = filtered[filtered.length - 1];
+        lastPoint = { x: lp.af, y: lp.bf };
     }
 
     if (lines.length === 0) {
