@@ -253,3 +253,49 @@ article li h5 {
 .colHorizontal h4 {
     margin-bottom: 4px;
 }
+
+/* import progress bar + preview + stats (big SVG files) ---------------------------------------*/
+
+.progressbar {
+    display: block;
+    position: relative;
+    width: 340px;
+    height: 16px;
+    background-color: #E8E8E8;
+    border-radius: 8px;
+    margin-top: 10px;
+}
+
+.progressfill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0%;
+    height: 16px;
+    background-color: #33a6cc;
+    border-radius: 8px;
+    transition: width 120ms linear;
+}
+
+.progresslabel {
+    display: block;
+    font-size: 13px;
+    margin-top: 2px;
+}
+
+.svgPreview {
+    display: block;
+    width: 340px;
+    height: auto;
+    max-height: 300px;
+    object-fit: contain;
+    background-color: white;
+    border: 1px solid #DDDDDD;
+    border-radius: 6px;
+    margin-top: 8px;
+}
+
+#conversionStats {
+    font-size: 13px;
+    margin-top: 4px;
+}

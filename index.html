@@ -77,7 +77,7 @@
                         <div style="display: flex; margin-top: 5px;" class="tooltip">
                             <input type="button" class="smallButton" name="save" id="save" value="Save" onclick="saveParameters()" style="margin-right: 5px;">
                             <label type="button" for="parametersImport" class="smallButton" name="Import" value="Import" style="cursor:pointer;">Import</label>
-                            <input type="file" accept=".txt, .svg" name="parametersImport" id="parametersImport" onChange="loadParameters(event)" value="SVG file" style="display: none;">
+                            <input type="file" accept=".json, .txt" name="parametersImport" id="parametersImport" onChange="importParameters(event)" value="Parameters file" style="display: none;">
                         </div>
                     </li>
 
@@ -85,8 +85,9 @@
                         <p>Stepper motor specificities</p>
                         <div style="display:flex; margin-top: 10px;">
                             <div style="padding-right:10px;">
-                                <p class="tooltip">mm/rev : <span class="tooltiptext">distance per revolution, periphery of spool</span></p>
-                                <input type=number name="distance per revolution" id="mmPerRev" value="40" style="width:60px;" onchange="updateParameters()">
+                                <p class="tooltip">mm/rev : <span class="tooltiptext">distance per revolution, periphery of spool; the controller GUI shows only the whole part (80.5 displayed as 80) and sends C29 as 80</span></p>
+                                <input type=number name="distance per revolution" id="mmPerRev" value="80.5" style="width:60px;" onchange="updateParameters()">
+                                <p>displayed : <span id="mmPerRevShown">80</span></p>
                             </div>
                             <div>
                                 <p class="tooltip">steps/rev :<span class="tooltiptext">steps per revolution, refer to datasheet motor</span></p>
@@ -104,6 +105,41 @@
                             <div>
                                 <p>Acceleration</p>
                                 <input type=number name="Acceleration" id="acceleration" value="1242" style="width:60px;" placeholder="steps/s" onchange="updateParameters()">
+                            </div>
+                        </div>
+                        <div style="display:flex; margin-top: 10px;">
+                            <div style="padding-right:10px;">
+                                <p>pen lift up :</p><input type=number name="penLiftUp" id="penLiftUp" value="90" style="width:60px;" onchange="updateParameters()">
+                            </div>
+                            <div>
+                                <p>pen lift down :</p><input type=number name="penLiftDown" id="penLiftDown" value="180" style="width:60px;" onchange="updateParameters()">
+                            </div>
+                        </div>
+                    </li>
+                    <li class="parameters">
+                        <p>Drawing placement on machine</p>
+                        <div style="display:flex; margin-top: 10px;">
+                            <div style="padding-right:10px;">
+                                <p>scale : <span class="tooltiptext">controller.vector.scaling / 100 (XL : 24.6 -> 0.246)</span></p><input type=number name="scale" id="scale" value="0.246" style="width:60px;" onchange="updateParameters()">
+                            </div>
+                            <div>
+                                <p>unit to mm : <span class="tooltiptext">mm per SVG user unit; the controller reads raw units (1)</span></p><input type=number name="unitToMM" id="unitToMM" value="1" style="width:60px;" onchange="updateParameters()">
+                            </div>
+                        </div>
+                        <div style="display:flex; margin-top: 10px;">
+                            <div style="padding-right:10px;">
+                                <p>X offset (mm)</p><input type=number name="offsetX" id="offsetX" value="746.94" style="width:60px;" onchange="updateParameters()">
+                            </div>
+                            <div>
+                                <p>Y offset (mm)</p><input type=number name="offsetY" id="offsetY" value="1932.73" style="width:60px;" onchange="updateParameters()">
+                            </div>
+                        </div>
+                        <div style="display:flex; margin-top: 10px;">
+                            <div style="padding-right:10px;">
+                                <p>min line length (steps)</p><input type=number name="minLineLength" id="minLineLength" value="2" style="width:60px;" onchange="updateParameters()">
+                            </div>
+                            <div>
+                                <p>max segment length</p><input type=number name="maxSegmentLength" id="maxSegmentLength" value="2" style="width:60px;" onchange="updateParameters()">
                             </div>
                         </div>
                     </li>
@@ -128,6 +164,9 @@
                             <label type="button" for="fileupload" class="smallButton" name="Import" value="Import" style="cursor:pointer;">Import</label>
                             <input type="file" accept=".txt, .svg" name="fileupload" id="fileupload" onChange="loadSVG(event)" value="SVG file" style="display: none;">
                         </div>
+                        <div class="progressbar"><div class="progressfill" id="progressFill"></div><span class="progresslabel" id="progressLabel"></span></div>
+                        <img class="svgPreview" id="svgPreview" alt="SVG preview (display only)"></img>
+                        <p id="conversionStats">Import statistics will appear here.</p>
                     </li>
                 </lu>
             </article>
@@ -138,7 +177,7 @@
                 <lu>
                     <li>
                         <textarea id="gcodeDiv" rows="4" cols="15"></textarea><br>
-                        <input type="button" class="button" name="Download text" onclick="exportFile('test.txt', 'gcodeDiv')" value="Download .txt" style="margin-top: 10px;">
+                        <input type="button" class="button" name="Download text" value="Export .txt (properties + gcode)" onclick="exportGcode()" style="margin-top: 10px;">
                         <div style="display: flex; margin-top: 5px;">
                             <input type="button" class="smallButton" name="Clear" value="Clear" onclick="clearData('gcodeDiv')" style="margin-right: 5px;">
                             <label type="button" for="gcodeImport" class="smallButton" name="Import" value="Import" style="cursor:pointer;">Import</label>

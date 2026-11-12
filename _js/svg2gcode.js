@@ -254,9 +254,17 @@ function svgDocumentInfo(svgString) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Convertit un SVG en commandes Polargraph.
+ * Convertit un SVG en commands Polargraph.
  *
- * Contrat de placement (identique à celui recommandé par compareCoords.fitPlacement) :
+ * Two entry points :
+ *   svg2gcode(svg, settings, parameters)            → string (used by the tests/harness)
+ *   svg2gcodeAsync(svg, settings, parameters, onProgress)
+ *        → Promise → { lines: [...], stats: {paths, points, kept} }
+ *        conversion chunked per path : at each ~60 ms the loop yields to the browser
+ *        (await setTimeout 0) so the page stays fluid on a 800k-path SVG ;
+ *        onProgress(pathsDone, pathsTotal) called at each chunk.
+ *
+ * Contrat de placement (identique à celui recommended by compareCoords.fitPlacement) :
  *   point machine (mm) = (unité SVG − origine viewBox) × mm/unité × scale + (offsetX, offsetY)
  *
  * `settings` (prioritaire) puis `parameters` :
@@ -266,7 +274,11 @@ function svgDocumentInfo(svgString) {
  * Sortie : C14 (stylo levé) → C13 (stylo posé) → C09 (premier point) puis C17 (mouvements),
  * une séquence C13/C14 par tracé ; coordonnées natives A, B dans l'unité de sortie (pas ou mm).
  */
-function svg2gcode(svg, settings, parameters) {
+/* ------------------------------------------------------------------ */
+/*  Preparation (shared by the sync and the async entry points)         */
+/* ------------------------------------------------------------------ */
+
+function svg2gcodePrepare(svg, settings, parameters) {
     svg = String(svg).replace(/^[\n\r \t]/gm, '');
     settings = settings || {};
     parameters = parameters || {};
@@ -289,33 +301,42 @@ function svg2gcode(svg, settings, parameters) {
     var mmPerUnit = (unitToMMpick !== null ? toNum(unitToMMpick, doc.unitToMM) : doc.unitToMM) * scale;
     var minLineLength = toNum(pickOption('minLineLength', settings, parameters, 0), 0);
 
-    // Format de sortie : décimales configurables en mm ; pas entiers sinon (arrondis fait dans polargraphNative)
+    // Format de sortie : décimales configurables en mm ; pas entiers sinon
     function fmt(v) {
         return (cfg.outputUnit === 'mm') ? (+v.toFixed(decimals)).toString() : String(v);
     }
 
     var parsed = SVGReader.parse(svg, {});
-    var paths = parsed.allcolors || [];
 
-    /* Sequence de émission : replica of sendVectorShapes in drawing.pde
-     * + filterPointsLowPass (native filter) : per path, if the first point differs from
-     * the last emitted, C14 ; then C17 on first point ; then C13 if lifted ; then
-     * remaining points C17 ; final C14 at very end. The first point of a path is NOT
-     * emitted with C09 — controller always uses CMD_CHANGELENGTHDIRECT (C17).
-     * low-pass : keep point j only if |ΔA|>minLineLength OR |ΔB|>minLineLength (native,
-     * integer steps) ; path with <2 surviving points emits nothing. */
-    var lines = [];
-    var lastPoint = { x: 0, y: 0 };   // PVector lastPoint = new PVector()
-    for (var i = 0; i < paths.length; i++) {
-        var sub = paths[i] || [];
+    return {
+        paths: parsed.allcolors || [],
+        doc: doc, cfg: cfg, mmPerUnit: mmPerUnit,
+        offsetX: offsetX, offsetY: offsetY,
+        maxSeg: maxSeg, penUp: penUp, penDown: penDown,
+        minLineLength: minLineLength, fmt: fmt
+    };
+}
+
+/**
+ * Emission path [from, to[ in `lines` ; `state` carries lastPoint (carried across paths,
+ * like the controller's lastPoint PVector). Returns stats {points, kept}.
+ * Sequence per path (cf. sendVectorShapes drawing.pde:680-724 + filterPointsLowPass) :
+ * identical to the previous inline loop of svg2gcode.
+ */
+function convertPaths(pre, lines, state, from, to) {
+    var doc = pre.doc;
+    var stats = { points: 0, kept: 0 };
+    for (var i = from; i < to; i++) {
+        var sub = pre.paths[i] || [];
         // phase 1 : all points converted, those outside machine dropped
         var pts = [];
         for (var j = 0; j < sub.length; j++) {
             var p = sub[j];
             if (!p || !isFinite(p.x) || !isFinite(p.y)) continue;
-            var mx = (p.x - doc.minX) * mmPerUnit + offsetX;
-            var my = (p.y - doc.minY) * mmPerUnit + offsetY;
-            var n = polargraphNative(mx, my, cfg);
+            stats.points++;
+            var mx = (p.x - doc.minX) * pre.mmPerUnit + pre.offsetX;
+            var my = (p.y - doc.minY) * pre.mmPerUnit + pre.offsetY;
+            var n = polargraphNative(mx, my, pre.cfg);
             if (!n) {
                 console.warn('svg2gcode : point (' + mx.toFixed(2) + ' ; ' + my.toFixed(2) + ' mm) hors de la machine, ignoré');
                 continue;
@@ -329,26 +350,81 @@ function svg2gcode(svg, settings, parameters) {
             var prev = filtered[filtered.length - 1];
             var diffA = Math.trunc(pts[k].af + 0.5) - Math.trunc(prev.af + 0.5);
             var diffB = Math.trunc(pts[k].bf + 0.5) - Math.trunc(prev.bf + 0.5);
-            if (Math.abs(diffA) > minLineLength || Math.abs(diffB) > minLineLength) {
+            if (Math.abs(diffA) > pre.minLineLength || Math.abs(diffB) > pre.minLineLength) {
                 filtered.push(pts[k]);
             }
         }
-        if (filtered.length < 2) continue;   // controller : result.size()<2 → clear ; empty path emits nothing
-        var lift = !(filtered[0].af === lastPoint.x && filtered[0].bf === lastPoint.y);
-        if (lift) lines.push(penUp + ',END');
-        lines.push('C17,' + fmt(filtered[0].a) + ',' + fmt(filtered[0].b) + ',' + maxSeg + ',END');
-        if (lift) lines.push(penDown + ',END');
+        if (filtered.length < 2) continue;   // controller : result.size()<2 → clear
+        stats.kept += filtered.length;
+        var lift = !(filtered[0].af === state.x && filtered[0].bf === state.y);
+        if (lift) lines.push(pre.penUp + ',END');
+        lines.push('C17,' + pre.fmt(filtered[0].a) + ',' + pre.fmt(filtered[0].b) + ',' + pre.maxSeg + ',END');
+        if (lift) lines.push(pre.penDown + ',END');
         for (var m = 1; m < filtered.length; m++) {
-            lines.push('C17,' + fmt(filtered[m].a) + ',' + fmt(filtered[m].b) + ',' + maxSeg + ',END');
+            lines.push('C17,' + pre.fmt(filtered[m].a) + ',' + pre.fmt(filtered[m].b) + ',' + pre.maxSeg + ',END');
         }
         var lp = filtered[filtered.length - 1];
-        lastPoint = { x: lp.af, y: lp.bf };
+        state.x = lp.af;
+        state.y = lp.bf;
     }
+    return stats;
+}
+
+/**
+ * Synchronous entry point (tests / harness) — identical output to before the refactor.
+ */
+function svg2gcode(svg, settings, parameters) {
+    var pre = svg2gcodePrepare(svg, settings, parameters);
+    var lines = [];
+    var state = { x: 0, y: 0 };   // PVector lastPoint = new PVector()
+    convertPaths(pre, lines, state, 0, pre.paths.length);
 
     if (lines.length === 0) {
         console.warn('svg2gcode : aucun tracé exploitable dans le SVG (pas de C13 émis)');
         return '';
     }
-    lines.push(penUp + ',END');
+    lines.push(pre.penUp + ',END');
     return lines.join('\n') + '\n';
+}
+
+/**
+ * Chunked entry point for big files (800k paths and more).
+ * Returns a Promise → { lines: [array of gcode lines], stats: {paths, points, kept} }.
+ * The path loop works in ~60 ms chunks separated by `await setTimeout 0` so the browser
+ * repaints between chunks (progress bar moves, page stays fluid).
+ * `onProgress(pathsDone, pathsTotal)` is called at the end of each chunk.
+ * NOTE : SVGReader.parse (XML DOM) stays one blocking pass — unavoidable with this parser ;
+ * the dashboard shows a "parsing" label before calling this.
+ */
+function nextTick() {
+    return new Promise(function (done) { setTimeout(done, 0); });
+}
+
+async function svg2gcodeAsync(svg, settings, parameters, onProgress) {
+    var pre = svg2gcodePrepare(svg, settings, parameters);
+    var lines = [];
+    var state = { x: 0, y: 0 };
+    var stats = { paths: pre.paths.length, points: 0, kept: 0 };
+    var n = pre.paths.length;
+    var i = 0;
+    while (i < n) {
+        var t0 = Date.now();
+        var done = i;
+        while (done < n && (done === i || Date.now() - t0 < 60)) {
+            var s = convertPaths(pre, lines, state, done, done + 1);
+            stats.points += s.points;
+            stats.kept += s.kept;
+            done++;
+        }
+        i = done;
+        if (onProgress) onProgress(i, n);
+        if (i < n) await nextTick();
+    }
+
+    if (lines.length === 0) {
+        console.warn('svg2gcodeAsync : aucun tracé exploitable dans le SVG (pas de C13 émis)');
+        return { lines: lines, stats: stats };
+    }
+    lines.push(pre.penUp + ',END');
+    return { lines: lines, stats: stats };
 }
