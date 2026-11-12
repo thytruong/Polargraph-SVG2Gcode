@@ -245,101 +245,81 @@ function svgDocumentInfo(svgString) {
 /*  Conversion SVG → G-code                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Convertit un SVG en commandes Polargraph.
+ *
+ * Contrat de placement (identique à celui recommandé par compareCoords.fitPlacement) :
+ *   point machine (mm) = (unité SVG − origine viewBox) × mm/unité × scale + (offsetX, offsetY)
+ *
+ * `settings` (prioritaire) puis `parameters` :
+ *   scale (1) | offsetX, offsetY (0) | maxSegmentLength (2) | decimals (3)
+ *   outputUnit | nativeRounding | quantize | applyMicrostepping | penUpCmd | penDownCmd
+ *
+ * Sortie : C14 (stylo levé) → C13 (stylo posé) → C09 (premier point) puis C17 (mouvements),
+ * une séquence C13/C14 par tracé ; coordonnées natives A, B dans l'unité de sortie (pas ou mm).
+ */
 function svg2gcode(svg, settings, parameters) {
-    svg = svg.replace(/^[\n\r \t]/gm, '');
+    svg = String(svg).replace(/^[\n\r \t]/gm, '');
     settings = settings || {};
     parameters = parameters || {};
 
+    if (typeof SVGReader === 'undefined' || typeof SVGReader.parse !== 'function') {
+        throw new Error('svg2gcode : SVGReader.js doit être chargé avant svg2gcode.js');
+    }
+
     var cfg = nativeConfigFromParameters(parameters, settings);
-    var machine = { widthMM: cfg.widthMM, stepsPerMM: cfg.stepsPerMM };
-    var outputUnit = cfg.outputUnit;
-    var maxSeg = pickOption('maxSegmentLength', settings, parameters, 2);
+    var doc = svgDocumentInfo(svg);
+    var scale = toNum(pickOption('scale', settings, parameters, 1), 1);
+    var offsetX = toNum(pickOption('offsetX', settings, parameters, 0), 0);
+    var offsetY = toNum(pickOption('offsetY', settings, parameters, 0), 0);
+    var maxSeg = toNum(pickOption('maxSegmentLength', settings, parameters, 2), 2);
     var decimals = toNum(pickOption('decimals', settings, parameters, 3), 3);
-    var userScale = toNum(pickOption('scale', settings, parameters, 1), 1);
     var penUp = String(pickOption('penUpCmd', settings, parameters, PEN_UP_CMD));
     var penDown = String(pickOption('penDownCmd', settings, parameters, PEN_DOWN_CMD));
+    var mmPerUnit = doc.unitToMM * scale;
 
-    // --- unités et placement ------------------------------------------------
-    var doc = svgDocumentInfo(svg);
-    var mmPerUnit = doc.unitToMM * userScale;
-
-    var offsetX = toNum(pickOption('offsetX', settings, parameters, NaN), NaN);
-    var offsetY = toNum(pickOption('offsetY', settings, parameters, NaN), NaN);
-    if (!isFinite(offsetX)) {
-        offsetX = (doc.widthMM !== null) ? (machine.widthMM - doc.widthMM * userScale) / 2 : 0;
-    }
-    if (!isFinite(offsetY)) {
-        offsetY = 0;
-        console.warn('svg2gcode : offsetY non défini → origine du dessin placée sur la ligne des moteurs (y = 0).');
-    }
-
+    // Format de sortie : décimales configurables en mm ; pas entiers sinon (arrondis faits dans polargraphNative)
     function fmt(v) {
-        return (outputUnit === 'steps') ? String(v) : String(+v.toFixed(decimals));
-    }
-    function moveCmd(n) {
-        return ['C17', fmt(n.a), fmt(n.b), maxSeg, 'END'].join(',');
+        return (cfg.outputUnit === 'mm') ? (+v.toFixed(decimals)).toString() : String(v);
     }
 
-    // --- lecture des tracés -------------------------------------------------
     var parsed = SVGReader.parse(svg, {});
     var paths = parsed.allcolors || [];
-    var gcode = [];
-    var report = { unitSource: doc.source, mmPerUnit: mmPerUnit, offsetX: offsetX, offsetY: offsetY,
-                   outputUnit: outputUnit, stepsPerMM: machine.stepsPerMM, widthMM: machine.widthMM,
-                   paths: 0, points: 0, duplicatesSkipped: 0, outOfZone: 0, invalid: 0 };
 
-    // --- position de départ (le stylo est physiquement au « home » du dashboard) ---
-    var homeX = toNum(parameters.xPosition, NaN);
-    var homeY = toNum(parameters.yPosition, NaN);
-    var home = (isFinite(homeX) && isFinite(homeY)) ? polargraphNative(homeX, homeY, cfg) : null;
-    if (home) gcode.push(['C09', fmt(home.a), fmt(home.b), 'END'].join(','));
-
-    gcode.push(penUp + ',END');
-
-    for (var pathIdx = 0; pathIdx < paths.length; pathIdx++) {
-        var path = paths[pathIdx];
-        if (!path || path.length === 0) continue;
-
-        var pts = [];
-        var prev = null;
-        for (var i = 0; i < path.length; i++) {
-            var xmm = (path[i].x - doc.minX) * mmPerUnit + offsetX;
-            var ymm = (path[i].y - doc.minY) * mmPerUnit + offsetY;
-            if (xmm < 0 || xmm > machine.widthMM || ymm <= 0) report.outOfZone++;
-
-            var n = polargraphNative(xmm, ymm, cfg);
-            if (!n) { report.invalid++; continue; }
-            if (prev && n.a === prev.a && n.b === prev.b) { report.duplicatesSkipped++; continue; }
-            pts.push(n);
-            prev = n;
+    var lines = [];
+    for (var i = 0; i < paths.length; i++) {
+        var sub = paths[i] || [];
+        var moves = [];
+        var first = true;
+        for (var j = 0; j < sub.length; j++) {
+            var p = sub[j];
+            if (!p || !isFinite(p.x) || !isFinite(p.y)) continue;
+            var mx = (p.x - doc.minX) * mmPerUnit + offsetX;
+            var my = (p.y - doc.minY) * mmPerUnit + offsetY;
+            var n = polargraphNative(mx, my, cfg);
+            if (!n) {
+                console.warn('svg2gcode : point (' + mx.toFixed(2) + ' ; ' + my.toFixed(2) + ' mm) hors de la machine, ignoré');
+                first = true;   // le prochain point émis redevient un C09
+                continue;
+            }
+            if (first) {
+                moves.push('C09,' + fmt(n.a) + ',' + fmt(n.b) + ',END');
+            } else {
+                moves.push('C17,' + fmt(n.a) + ',' + fmt(n.b) + ',' + maxSeg + ',END');
+            }
+            first = false;
         }
-        if (pts.length < 2) continue;                    // tracé dégénéré : rien à dessiner
-
-        gcode.push(moveCmd(pts[0]));                     // stylo levé → premier point
-        gcode.push(penDown + ',END');                    // stylo posé
-        for (var j = 1; j < pts.length; j++) gcode.push(moveCmd(pts[j]));
-        gcode.push(penUp + ',END');                      // stylo levé
-
-        report.paths++;
-        report.points += pts.length;
+        if (moves.length === 0) continue;   // tracé vide ou hors machine : on saute
+        lines.push(penUp + ',END');
+        lines.push(penDown + ',END');
+        for (var k = 0; k < moves.length; k++) lines.push(moves[k]);
+        lines.push(penUp + ',END');
     }
 
-    if (home) gcode.push(moveCmd(home));                 // retour au home (stylo levé)
-
-    if (report.outOfZone > 0) {
-        console.warn('svg2gcode : ' + report.outOfZone + ' point(s) hors de la zone [0 ; ' +
-                     machine.widthMM + '] mm en X ou au-dessus des moteurs. Ajustez offsetX / offsetY / scale.');
+    if (lines.length === 0) {
+        console.warn('svg2gcode : aucun tracé exploitable dans le SVG (pas de C13 émis)');
+        return '';
     }
-    svg2gcode.lastReport = report;                       // inspectable dans la console
-    return gcode.join('\n');
-}
-
-
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        svg2gcode: svg2gcode, calculateNativeCoords: calculateNativeCoords,
-        calculateCartesianCoords: calculateCartesianCoords, polargraphNative: polargraphNative,
-        resolveMachine: resolveMachine, nativeConfigFromParameters: nativeConfigFromParameters, inSteps: inSteps, svgDocumentInfo: svgDocumentInfo,
-        parseLengthToMM: parseLengthToMM, PX_TO_MM: PX_TO_MM
-    };
+    lines.push(penUp + ',END');
+    return lines.join('\n') + '\n';
 }

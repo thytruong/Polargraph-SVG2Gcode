@@ -47,7 +47,7 @@
             <article>
                 <lu>
                     <h2>Parameters</h2>
-                    <li class="parameters">
+                                                           <li class="parameters">
                         <p>Machine name :</p>
                         <input type="text" name="machine name" id="machineName" value="Default" onchange="updateParameters()">
                         <p style="margin-top: 10px;">Machine width (mm):</p>
@@ -63,7 +63,24 @@
                                 <p>Y position</p><input type=number name=" vertical point" id="yPosition" value="20" style="width:60px;" onchange="updateParameters()">
                             </div>
                         </div>
+                        <p style="margin-top: 10px;">Page width (mm):</p>
+                        <input type=number name="pageWidth" id="pageWidth" value="1560" style="width:60px;" onchange="updateParameters()">
+                        <p style="margin-top: 10px;">Page height (mm):</p>
+                        <input type=number name="pageHeight" id="pageHeight" value="840" style="width:60px;" onchange="updateParameters()">
+                        <p style="margin-top: 10px;">Page X position (mm):</p>
+                        <input type=number name="pageX" id="pageX" value="684" style="width:60px;" onchange="updateParameters()">
+                        <p style="margin-top: 10px;">Page Y position (mm):</p>
+                        <input type=number name="pageY" id="pageY" value="1903" style="width:60px;" onchange="updateParameters()">
                     </li>
+                    <li class="parameters">
+                        <input type="button" class="button" name="setup" id="setup" onclick="setParameters()" value="Parse">
+                        <div style="display: flex; margin-top: 5px;" class="tooltip">
+                            <input type="button" class="smallButton" name="save" id="save" value="Save" onclick="saveParameters()" style="margin-right: 5px;">
+                            <label type="button" for="parametersImport" class="smallButton" name="Import" value="Import" style="cursor:pointer;">Import</label>
+                            <input type="file" accept=".txt, .svg" name="parametersImport" id="parametersImport" onChange="loadParameters(event)" value="SVG file" style="display: none;">
+                        </div>
+                    </li>
+
                     <li class="parameters">
                         <p>Stepper motor specificities</p>
                         <div style="display:flex; margin-top: 10px;">
@@ -149,6 +166,6 @@
 <script type="text/javascript" src="_js/SVGReader.js"></script>
 <script type="text/javascript" src="_js/svg2gcode.js"></script>
 <script type="text/javascript" src="_js/dashBoard.js"></script>
-<script type="text/javascript" src="compareCoords.js"></script>
+<script type="text/javascript" src="_js/compareCoords.js"></script>
 
 </html>

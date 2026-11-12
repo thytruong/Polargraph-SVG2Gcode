@@ -12,8 +12,11 @@ var defaultProperties = {
     "microstepping": "16",
     "maxSpeed": "6844",
     "acceleration": "2028",
-
-"scale": 0.924,
-"offsetX": 742.3,
-"offsetY": 1920.7
+    "pageWidth": "1560",
+    "pageHeight": "840",
+    "pageX": "684",
+    "pageY": "1903",
+    "scale": 0.924,
+    "offsetX": 742.3,
+    "offsetY": 1920.7
 }
